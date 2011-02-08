@@ -20,35 +20,36 @@ Tests For Compute
 """
 
 import datetime
-import logging
 
+from nova import compute
 from nova import context
 from nova import db
 from nova import exception
 from nova import flags
+from nova import log as logging
 from nova import test
 from nova import utils
 from nova.auth import manager
-from nova.compute import api as compute_api
 
 
+LOG = logging.getLogger('nova.tests.compute')
 FLAGS = flags.FLAGS
+flags.DECLARE('stub_network', 'nova.compute.manager')
 
 
 class ComputeTestCase(test.TestCase):
     """Test case for compute"""
     def setUp(self):
-        logging.getLogger().setLevel(logging.DEBUG)
         super(ComputeTestCase, self).setUp()
         self.flags(connection_type='fake',
                    stub_network=True,
                    network_manager='nova.network.manager.FlatManager')
         self.compute = utils.import_object(FLAGS.compute_manager)
-        self.compute_api = compute_api.ComputeAPI()
+        self.compute_api = compute.API()
         self.manager = manager.AuthManager()
         self.user = self.manager.create_user('fake', 'fake', 'fake')
         self.project = self.manager.create_project('fake', 'fake', 'fake')
-        self.context = context.get_admin_context()
+        self.context = context.RequestContext('fake', 'fake', False)
 
     def tearDown(self):
         self.manager.delete_user(self.user)
@@ -68,30 +69,73 @@ class ComputeTestCase(test.TestCase):
         inst['ami_launch_index'] = 0
         return db.instance_create(self.context, inst)['id']
 
+    def _create_group(self):
+        values = {'name': 'testgroup',
+                  'description': 'testgroup',
+                  'user_id': self.user.id,
+                  'project_id': self.project.id}
+        return db.security_group_create(self.context, values)
+
     def test_create_instance_defaults_display_name(self):
         """Verify that an instance cannot be created without a display_name."""
         cases = [dict(), dict(display_name=None)]
         for instance in cases:
-            ref = self.compute_api.create_instances(self.context,
+            ref = self.compute_api.create(self.context,
                 FLAGS.default_instance_type, None, **instance)
             try:
-                self.assertNotEqual(ref[0].display_name, None)
+                self.assertNotEqual(ref[0]['display_name'], None)
             finally:
                 db.instance_destroy(self.context, ref[0]['id'])
 
     def test_create_instance_associates_security_groups(self):
-        """Make sure create_instances associates security groups"""
-        values = {'name': 'default',
-                  'description': 'default',
-                  'user_id': self.user.id,
-                  'project_id': self.project.id}
-        group = db.security_group_create(self.context, values)
-        ref = self.compute_api.create_instances(self.context,
-            FLAGS.default_instance_type, None, security_group=['default'])
+        """Make sure create associates security groups"""
+        group = self._create_group()
+        ref = self.compute_api.create(
+                self.context,
+                instance_type=FLAGS.default_instance_type,
+                image_id=None,
+                security_group=['testgroup'])
         try:
-            self.assertEqual(len(ref[0]['security_groups']), 1)
+            self.assertEqual(len(db.security_group_get_by_instance(
+                             self.context, ref[0]['id'])), 1)
+            group = db.security_group_get(self.context, group['id'])
+            self.assert_(len(group.instances) == 1)
         finally:
             db.security_group_destroy(self.context, group['id'])
+            db.instance_destroy(self.context, ref[0]['id'])
+
+    def test_destroy_instance_disassociates_security_groups(self):
+        """Make sure destroying disassociates security groups"""
+        group = self._create_group()
+
+        ref = self.compute_api.create(
+                self.context,
+                instance_type=FLAGS.default_instance_type,
+                image_id=None,
+                security_group=['testgroup'])
+        try:
+            db.instance_destroy(self.context, ref[0]['id'])
+            group = db.security_group_get(self.context, group['id'])
+            self.assert_(len(group.instances) == 0)
+        finally:
+            db.security_group_destroy(self.context, group['id'])
+
+    def test_destroy_security_group_disassociates_instances(self):
+        """Make sure destroying security groups disassociates instances"""
+        group = self._create_group()
+
+        ref = self.compute_api.create(
+                self.context,
+                instance_type=FLAGS.default_instance_type,
+                image_id=None,
+                security_group=['testgroup'])
+
+        try:
+            db.security_group_destroy(self.context, group['id'])
+            group = db.security_group_get(context.get_admin_context(
+                                          read_deleted=True), group['id'])
+            self.assert_(len(group.instances) == 0)
+        finally:
             db.instance_destroy(self.context, ref[0]['id'])
 
     def test_run_terminate(self):
@@ -101,13 +145,13 @@ class ComputeTestCase(test.TestCase):
         self.compute.run_instance(self.context, instance_id)
 
         instances = db.instance_get_all(context.get_admin_context())
-        logging.info("Running instances: %s", instances)
+        LOG.info(_("Running instances: %s"), instances)
         self.assertEqual(len(instances), 1)
 
         self.compute.terminate_instance(self.context, instance_id)
 
         instances = db.instance_get_all(context.get_admin_context())
-        logging.info("After terminating instances: %s", instances)
+        LOG.info(_("After terminating instances: %s"), instances)
         self.assertEqual(len(instances), 0)
 
     def test_run_terminate_timestamps(self):
@@ -136,11 +180,34 @@ class ComputeTestCase(test.TestCase):
         self.compute.unpause_instance(self.context, instance_id)
         self.compute.terminate_instance(self.context, instance_id)
 
+    def test_suspend(self):
+        """ensure instance can be suspended"""
+        instance_id = self._create_instance()
+        self.compute.run_instance(self.context, instance_id)
+        self.compute.suspend_instance(self.context, instance_id)
+        self.compute.resume_instance(self.context, instance_id)
+        self.compute.terminate_instance(self.context, instance_id)
+
     def test_reboot(self):
         """Ensure instance can be rebooted"""
         instance_id = self._create_instance()
         self.compute.run_instance(self.context, instance_id)
         self.compute.reboot_instance(self.context, instance_id)
+        self.compute.terminate_instance(self.context, instance_id)
+
+    def test_set_admin_password(self):
+        """Ensure instance can have its admin password set"""
+        instance_id = self._create_instance()
+        self.compute.run_instance(self.context, instance_id)
+        self.compute.set_admin_password(self.context, instance_id)
+        self.compute.terminate_instance(self.context, instance_id)
+
+    def test_snapshot(self):
+        """Ensure instance can be snapshotted"""
+        instance_id = self._create_instance()
+        name = "myfakesnapshot"
+        self.compute.run_instance(self.context, instance_id)
+        self.compute.snapshot_instance(self.context, instance_id, name)
         self.compute.terminate_instance(self.context, instance_id)
 
     def test_console_output(self):
@@ -153,6 +220,16 @@ class ComputeTestCase(test.TestCase):
         self.assert_(console)
         self.compute.terminate_instance(self.context, instance_id)
 
+    def test_ajax_console(self):
+        """Make sure we can get console output from instance"""
+        instance_id = self._create_instance()
+        self.compute.run_instance(self.context, instance_id)
+
+        console = self.compute.get_ajax_console(self.context,
+                                                instance_id)
+        self.assert_(console)
+        self.compute.terminate_instance(self.context, instance_id)
+
     def test_run_instance_existing(self):
         """Ensure failure when running an instance that already exists"""
         instance_id = self._create_instance()
@@ -161,4 +238,23 @@ class ComputeTestCase(test.TestCase):
                           self.compute.run_instance,
                           self.context,
                           instance_id)
+        self.compute.terminate_instance(self.context, instance_id)
+
+    def test_lock(self):
+        """ensure locked instance cannot be changed"""
+        instance_id = self._create_instance()
+        self.compute.run_instance(self.context, instance_id)
+
+        non_admin_context = context.RequestContext(None, None, False, False)
+
+        # decorator should return False (fail) with locked nonadmin context
+        self.compute.lock_instance(self.context, instance_id)
+        ret_val = self.compute.reboot_instance(non_admin_context, instance_id)
+        self.assertEqual(ret_val, False)
+
+        # decorator should return None (success) with unlocked nonadmin context
+        self.compute.unlock_instance(self.context, instance_id)
+        ret_val = self.compute.reboot_instance(non_admin_context, instance_id)
+        self.assertEqual(ret_val, None)
+
         self.compute.terminate_instance(self.context, instance_id)
