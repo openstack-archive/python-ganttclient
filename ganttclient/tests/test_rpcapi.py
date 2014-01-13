@@ -57,27 +57,31 @@ class SchedulerRpcAPITestCase(test.NoDBTestCase):
 
     def test_run_instance(self):
         self._test_scheduler_api('run_instance', rpc_method='cast',
-                request_spec='fake_request_spec',
-                admin_password='pw', injected_files='fake_injected_files',
-                requested_networks='fake_requested_networks',
-                is_first_time=True, filter_properties='fake_filter_properties',
-                legacy_bdm_in_spec=False, version='2.9')
+                                 request_spec='fake_request_spec',
+                                 admin_password='pw',
+                                 injected_files='fake_injected_files',
+                                 requested_networks='fake_requested_networks',
+                                 is_first_time=True,
+                                 filter_properties='fake_filter_properties',
+                                 legacy_bdm_in_spec=False, version='2.9')
 
     def test_prep_resize(self):
         self._test_scheduler_api('prep_resize', rpc_method='cast',
-                instance='fake_instance',
-                instance_type='fake_type', image='fake_image',
-                request_spec='fake_request_spec',
-                filter_properties='fake_props', reservations=list('fake_res'))
+                                 instance='fake_instance',
+                                 instance_type='fake_type',
+                                 image='fake_image',
+                                 request_spec='fake_request_spec',
+                                 filter_properties='fake_props',
+                                 reservations=list('fake_res'))
 
     def test_select_hosts(self):
         self._test_scheduler_api('select_hosts', rpc_method='call',
-                request_spec='fake_request_spec',
-                filter_properties='fake_prop',
-                version='2.6')
+                                 request_spec='fake_request_spec',
+                                 filter_properties='fake_prop',
+                                 version='2.6')
 
     def test_select_destinations(self):
         self._test_scheduler_api('select_destinations', rpc_method='call',
-                request_spec='fake_request_spec',
-                filter_properties='fake_prop',
-                version='2.7')
+                                 request_spec='fake_request_spec',
+                                 filter_properties='fake_prop',
+                                 version='2.7')

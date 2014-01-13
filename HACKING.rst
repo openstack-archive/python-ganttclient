@@ -1,18 +1,13 @@
-Nova Style Commandments
+Gantt Style Commandments
 =======================
 
 - Step 1: Read the OpenStack Style Commandments
   http://docs.openstack.org/developer/hacking/
 - Step 2: Read on
 
-Nova Specific Commandments
+Gantt Specific Commandments
 ---------------------------
-
-- ``nova.db`` imports are not allowed in ``nova/virt/*``
-- [N309] no db session in public API methods (disabled)
-  This enforces a guideline defined in ``nova.openstack.common.db.sqlalchemy.session``
-- [N310] timeutils.utcnow() wrapper must be used instead of direct calls to
-  datetime.datetime.utcnow() to make it easy to override its return value in tests
+TBD
 
 Creating Unit Tests
 -------------------
@@ -23,7 +18,7 @@ submitted bug fix does have a unit test, be sure to add a new one that fails
 without the patch and passes with the patch.
 
 For more information on creating unit tests and utilizing the testing
-infrastructure in OpenStack Nova, please read ``nova/tests/README.rst``.
+infrastructure in OpenStack Gantt, please read ``gantt/tests/README.rst``.
 
 
 Running Tests
@@ -65,4 +60,4 @@ Like so::
     cd build/sphinx/latex
     make
 
-You should wind up with a PDF - Nova.pdf.
+You should wind up with a PDF - Gantt.pdf.
