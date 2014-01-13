@@ -1,7 +1,7 @@
 [run]
 branch = True
-source = nova
-omit = nova/tests/*,nova/openstack/*
+source = gantt
+omit = gantt/tests/*,gantt/openstack/*
 
 [report]
 ignore-errors = True
